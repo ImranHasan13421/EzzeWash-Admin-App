@@ -1,4 +1,5 @@
 // lib/features/report_screen.dart
+import 'service_reviews_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -492,7 +493,15 @@ class _ReportScreenState extends State<ReportScreen> {
                       child: ListTile(
                         contentPadding: const EdgeInsets.all(16),
                         onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reviews screen coming soon!')));
+                          Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) => ServiceReviewsScreen(
+                                      serviceId: s['id'],
+                                      serviceTitle: s['title']
+                                  )
+                              )
+                          );
                         },
                         title: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,

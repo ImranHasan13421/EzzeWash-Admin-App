@@ -364,7 +364,192 @@ class _RidersScreenState extends State<RidersScreen> {
     );
   }
 
+// ==========================================
+  // ACTION: EARNINGS CALCULATOR SHEET
+  // ==========================================
+  void _showEarningsCalculator(String riderId, String riderName) {
+    final TextEditingController baseRateCtrl = TextEditingController(text: '40');
+    final TextEditingController batchBonusCtrl = TextEditingController(text: '10');
 
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        builder: (_, controller) => Container(
+          decoration: const BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  children: [
+                    const Icon(Icons.calculate, color: AppColors.primary),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Updated Title to reflect it is fetching this month's data
+                          Text('Earnings (This Month)', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.text)),
+                          Text(riderName, style: GoogleFonts.inter(fontSize: 12, color: AppColors.subtext)),
+                        ],
+                      ),
+                    ),
+                    IconButton(icon: const Icon(Icons.close, color: AppColors.subtext), onPressed: () => Navigator.pop(context))
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: AppColors.border),
+
+              Expanded(
+                child: FutureBuilder<List<Map<String, dynamic>>>(
+                  // Fetch directly from orders table for the current month
+                  future: Supabase.instance.client
+                      .from('orders')
+                      .select('rider_id, pickup_rider_id, delivery_rider_id, status')
+                      .or('rider_id.eq.$riderId,pickup_rider_id.eq.$riderId,delivery_rider_id.eq.$riderId')
+                      .gte('updated_at', DateTime(DateTime.now().year, DateTime.now().month, 1).toIso8601String()),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+                    }
+
+                    final orders = snapshot.data ?? [];
+
+                    int roundTrips = 0;
+                    int pickupOnly = 0;
+                    int deliveryOnly = 0;
+
+                    // Replicate the exact logic from your SQL View, but filtered for this month
+                    for (var o in orders) {
+                      final status = o['status'] ?? '';
+                      bool hasPickup = false;
+                      bool hasDelivery = false;
+
+                      if ((o['pickup_rider_id'] == riderId || o['rider_id'] == riderId) &&
+                          ['in_process', 'ready', 'out_for_delivery', 'delivered'].contains(status)) {
+                        hasPickup = true;
+                      }
+
+                      if ((o['delivery_rider_id'] == riderId || o['rider_id'] == riderId) &&
+                          status == 'delivered') {
+                        hasDelivery = true;
+                      }
+
+                      if (hasPickup && hasDelivery) {
+                        roundTrips++;
+                      } else if (hasPickup) {
+                        pickupOnly++;
+                      } else if (hasDelivery) {
+                        deliveryOnly++;
+                      }
+                    }
+
+                    // Map to desktop display names
+                    final int baseLegs = roundTrips + pickupOnly + deliveryOnly;
+                    final int batchedExtras = roundTrips;
+
+                    return StatefulBuilder(
+                        builder: (context, setCalculatorState) {
+                          final double baseRate = double.tryParse(baseRateCtrl.text) ?? 0.0;
+                          final double batchBonus = double.tryParse(batchBonusCtrl.text) ?? 0.0;
+
+                          final double totalPayout = (baseLegs * baseRate) + (batchedExtras * batchBonus);
+
+                          return ListView(
+                            controller: controller,
+                            padding: const EdgeInsets.all(24),
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('Base Rate (৳)', style: GoogleFonts.inter(fontSize: 12, color: AppColors.subtext)),
+                                        const SizedBox(height: 8),
+                                        TextField(
+                                          controller: baseRateCtrl,
+                                          keyboardType: TextInputType.number,
+                                          onChanged: (v) => setCalculatorState(() {}),
+                                          decoration: InputDecoration(
+                                            filled: true,
+                                            fillColor: AppColors.surface,
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('Batch Bonus (৳)', style: GoogleFonts.inter(fontSize: 12, color: AppColors.subtext)),
+                                        const SizedBox(height: 8),
+                                        TextField(
+                                          controller: batchBonusCtrl,
+                                          keyboardType: TextInputType.number,
+                                          onChanged: (v) => setCalculatorState(() {}),
+                                          decoration: InputDecoration(
+                                            filled: true,
+                                            fillColor: AppColors.surface,
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 32),
+
+                              // Calculation Breakdown
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Base Legs (Anchor)', style: GoogleFonts.inter(color: AppColors.subtext)),
+                                  Text('$baseLegs x ৳${baseRate.toStringAsFixed(0)}', style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.text)),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Batched Extras (Same Address)', style: GoogleFonts.inter(color: AppColors.subtext)),
+                                  Text('$batchedExtras x ৳${batchBonus.toStringAsFixed(0)}', style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.text)),
+                                ],
+                              ),
+                              const SizedBox(height: 24),
+                              const Divider(color: AppColors.border),
+                              const SizedBox(height: 16),
+
+                              // Total Payout
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Total Salary Payout', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.text)),
+                                  Text('৳${totalPayout.toStringAsFixed(0)}', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.accent)),
+                                ],
+                              ),
+                            ],
+                          );
+                        }
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   // Helper for dates
   String _getMonth(int month) {

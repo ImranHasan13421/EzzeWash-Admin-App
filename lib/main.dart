@@ -5,8 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'core/constants/app_constants.dart';
 import 'core/theme/app_colors.dart';
-import 'features/admin_login_screen.dart';
-import 'features/home_layout.dart';
+import 'features/splash_screen.dart'; // Only the splash screen is needed here now
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,9 +39,8 @@ class MobileAdminApp extends StatelessWidget {
         textTheme: GoogleFonts.interTextTheme(),
         useMaterial3: true,
       ),
-      home: supabase.auth.currentSession != null
-          ? const HomeLayout()
-          : const AdminLoginScreen(),
+      // FIX: Set the home to your new Splash Screen!
+      home: const SplashScreen(),
     );
   }
 }

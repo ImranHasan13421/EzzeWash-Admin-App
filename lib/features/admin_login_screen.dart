@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../core/theme/app_colors.dart'; // Ensure this matches your filename
+import '../core/theme/app_colors.dart';
 import 'home_layout.dart';
 
 class AdminLoginScreen extends StatefulWidget {
@@ -46,13 +46,19 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     } on AuthException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unexpected error occurred'), backgroundColor: AppColors.error),
+          const SnackBar(
+            content: Text('Unexpected error occurred'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     } finally {
@@ -79,15 +85,12 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Logo or Icon
                 const Icon(
                   Icons.local_laundry_service_rounded,
                   size: 80,
                   color: AppColors.primary,
                 ),
                 const SizedBox(height: 24),
-
-                // Welcome Text
                 Text(
                   'Welcome Back',
                   textAlign: TextAlign.center,
@@ -107,8 +110,6 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 48),
-
-                // Email Field
                 Text(
                   'Email Address',
                   style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text),
@@ -138,8 +139,6 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-
-                // Password Field
                 Text(
                   'Password',
                   style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text),
@@ -178,8 +177,6 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 48),
-
-                // Login Button
                 SizedBox(
                   height: 56,
                   child: ElevatedButton(

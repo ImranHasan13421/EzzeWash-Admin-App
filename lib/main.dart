@@ -23,7 +23,7 @@ void main() async {
   OneSignal.Debug.setLogLevel(OSLogLevel.verbose);
 
   // 3. Initialize with your App ID
-  OneSignal.initialize("2e24df5b-6024-428c-926e-641d10efe4f5");
+  OneSignal.initialize(dotenv.env['ONESIGNAL_APP_ID'] ?? '');
 
   // 4. Prompt for notification permissions (Essential for Android 13+)
   OneSignal.Notifications.requestPermission(true);

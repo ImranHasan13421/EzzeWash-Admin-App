@@ -9,6 +9,6 @@ class AppColors {
   static const Color border = Color(0xFFE2E8F0);
   static const Color error = Color(0xFFEF4444);
   static const Color success = Color(0xFF10B981);
-  static const Color accent = Color(0xFF8B5CF6);
+  static const Color accent = Color(0xFF0358F3);
   static const Color warning = Colors.orange;
 }

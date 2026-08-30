@@ -7,7 +7,10 @@ import '../core/constants/app_constants.dart';
 import '../core/theme/app_colors.dart';
 
 class RidersScreen extends StatefulWidget {
-  const RidersScreen({super.key});
+  final bool isSuperAdmin;
+  final String? managerStoreId;
+
+  const RidersScreen({super.key, required this.isSuperAdmin, this.managerStoreId});
 
   @override
   State<RidersScreen> createState() => _RidersScreenState();
@@ -16,22 +19,73 @@ class RidersScreen extends StatefulWidget {
 class _RidersScreenState extends State<RidersScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
+  String? _resolvedStoreId;
+  bool _isLoadingStore = true;
 
-  Stream<List<Map<String, dynamic>>> _streamRiders() {
-    return Supabase.instance.client
+  @override
+  void initState() {
+    super.initState();
+    _resolvedStoreId = widget.managerStoreId;
+    if (!widget.isSuperAdmin && _resolvedStoreId == null) {
+      _resolveManagerStore();
+    } else {
+      _isLoadingStore = false;
+    }
+  }
+
+  Future<void> _resolveManagerStore() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
+        final memberRes = await Supabase.instance.client
+            .from('team_members')
+            .select('store_id')
+            .eq('email', user.email!)
+            .maybeSingle();
+        if (memberRes != null && mounted) {
+          setState(() {
+            _resolvedStoreId = memberRes['store_id'];
+            _isLoadingStore = false;
+          });
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error resolving store ID: $e');
+    }
+    if (mounted) setState(() => _isLoadingStore = false);
+  }
+
+  // --- UPDATED: Use standard future/query or joined stream for mobile if stream() doesn't support joins directly ---
+  // To make sure branch name is populated, we fetch/stream using a future or handle it reactively.
+  // Here we use a FutureBuilder combined with real-time refresh or a joined query stream approach.
+  Stream<List<Map<String, dynamic>>> _streamRidersWithStore() async* {
+    yield* Supabase.instance.client
         .from(AppConstants.ridersTable)
         .stream(primaryKey: ['id']);
   }
 
-  // ==========================================
-  // ACTION: TOGGLE ACTIVE STATUS
-  // ==========================================
+  // Helper to load riders with store names securely
+  Future<List<Map<String, dynamic>>> _fetchRidersWithStores() async {
+    final query = Supabase.instance.client
+        .from(AppConstants.ridersTable)
+        .select('*, stores(name)');
+
+    if (!widget.isSuperAdmin && _resolvedStoreId != null) {
+      query.eq('store_id', _resolvedStoreId!);
+    }
+
+    final res = await query.order('created_at', ascending: false);
+    return List<Map<String, dynamic>>.from(res);
+  }
+
   Future<void> _toggleActive(String id, bool currentStatus) async {
     try {
       await Supabase.instance.client
           .from(AppConstants.ridersTable)
           .update({'is_active': !currentStatus})
           .eq('id', id);
+      setState(() {}); // Refresh UI
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -41,9 +95,6 @@ class _RidersScreenState extends State<RidersScreen> {
     }
   }
 
-  // ==========================================
-  // ACTION: COLLECT CASH DIALOG
-  // ==========================================
   void _showCollectCashDialog(String riderId, String riderName, double totalDue) {
     final TextEditingController amountCtrl = TextEditingController(text: totalDue.toStringAsFixed(0));
     bool isSubmitting = false;
@@ -138,6 +189,7 @@ class _RidersScreenState extends State<RidersScreen> {
 
                             if (mounted) {
                               Navigator.pop(context);
+                              setState(() {});
                               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('৳$amount collected successfully!'), backgroundColor: AppColors.success));
                             }
                           } catch (e) {
@@ -162,9 +214,6 @@ class _RidersScreenState extends State<RidersScreen> {
     );
   }
 
-  // ==========================================
-  // ACTION: ORDER HISTORY SHEET
-  // ==========================================
   void _showOrderHistory(String riderId, String riderName) {
     showModalBottomSheet(
       context: context,
@@ -205,7 +254,7 @@ class _RidersScreenState extends State<RidersScreen> {
                       .select('order_number, total_price, created_at, status')
                       .or('rider_id.eq.$riderId,pickup_rider_id.eq.$riderId,delivery_rider_id.eq.$riderId')
                       .order('created_at', ascending: false)
-                      .limit(50), // Limit to recent 50 for mobile performance
+                      .limit(50),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: AppColors.primary));
                     final orders = snapshot.data ?? [];
@@ -266,9 +315,6 @@ class _RidersScreenState extends State<RidersScreen> {
     );
   }
 
-  // ==========================================
-  // ACTION: CASH LOGS SHEET
-  // ==========================================
   void _showCashLogs(String riderId, String riderName) {
     showModalBottomSheet(
       context: context,
@@ -303,14 +349,14 @@ class _RidersScreenState extends State<RidersScreen> {
               ),
               const Divider(height: 1, color: AppColors.border),
               Expanded(
-                child: StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: Supabase.instance.client
+                child: FutureBuilder<List<Map<String, dynamic>>>(
+                  future: Supabase.instance.client
                       .from('rider_cash_submissions')
-                      .stream(primaryKey: ['id'])
+                      .select()
                       .eq('rider_id', riderId)
                       .order('submitted_at', ascending: false),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: AppColors.primary));
                     final logs = snapshot.data ?? [];
                     if (logs.isEmpty) return Center(child: Text('No cash logs found.', style: GoogleFonts.inter(color: AppColors.subtext)));
 
@@ -364,9 +410,6 @@ class _RidersScreenState extends State<RidersScreen> {
     );
   }
 
-// ==========================================
-  // ACTION: EARNINGS CALCULATOR SHEET
-  // ==========================================
   void _showEarningsCalculator(String riderId, String riderName) {
     final TextEditingController baseRateCtrl = TextEditingController(text: '40');
     final TextEditingController batchBonusCtrl = TextEditingController(text: '10');
@@ -393,7 +436,6 @@ class _RidersScreenState extends State<RidersScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Updated Title to reflect it is fetching this month's data
                           Text('Earnings (This Month)', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.text)),
                           Text(riderName, style: GoogleFonts.inter(fontSize: 12, color: AppColors.subtext)),
                         ],
@@ -407,7 +449,6 @@ class _RidersScreenState extends State<RidersScreen> {
 
               Expanded(
                 child: FutureBuilder<List<Map<String, dynamic>>>(
-                  // Fetch directly from orders table for the current month
                   future: Supabase.instance.client
                       .from('orders')
                       .select('rider_id, pickup_rider_id, delivery_rider_id, status')
@@ -424,7 +465,6 @@ class _RidersScreenState extends State<RidersScreen> {
                     int pickupOnly = 0;
                     int deliveryOnly = 0;
 
-                    // Replicate the exact logic from your SQL View, but filtered for this month
                     for (var o in orders) {
                       final status = o['status'] ?? '';
                       bool hasPickup = false;
@@ -449,7 +489,6 @@ class _RidersScreenState extends State<RidersScreen> {
                       }
                     }
 
-                    // Map to desktop display names
                     final int baseLegs = roundTrips + pickupOnly + deliveryOnly;
                     final int batchedExtras = roundTrips;
 
@@ -457,7 +496,6 @@ class _RidersScreenState extends State<RidersScreen> {
                         builder: (context, setCalculatorState) {
                           final double baseRate = double.tryParse(baseRateCtrl.text) ?? 0.0;
                           final double batchBonus = double.tryParse(batchBonusCtrl.text) ?? 0.0;
-
                           final double totalPayout = (baseLegs * baseRate) + (batchedExtras * batchBonus);
 
                           return ListView(
@@ -508,8 +546,6 @@ class _RidersScreenState extends State<RidersScreen> {
                                 ],
                               ),
                               const SizedBox(height: 32),
-
-                              // Calculation Breakdown
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
@@ -528,8 +564,6 @@ class _RidersScreenState extends State<RidersScreen> {
                               const SizedBox(height: 24),
                               const Divider(color: AppColors.border),
                               const SizedBox(height: 16),
-
-                              // Total Payout
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
@@ -551,15 +585,11 @@ class _RidersScreenState extends State<RidersScreen> {
     );
   }
 
-  // Helper for dates
   String _getMonth(int month) {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return months[month - 1];
   }
 
-  // ==========================================
-  // MAIN UI BUILD
-  // ==========================================
   @override
   void dispose() {
     _searchCtrl.dispose();
@@ -568,16 +598,19 @@ class _RidersScreenState extends State<RidersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingStore) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    }
+
     return Column(
       children: [
-        // Search Bar
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: TextField(
             controller: _searchCtrl,
             onChanged: (val) => setState(() => _searchQuery = val.toLowerCase()),
             decoration: InputDecoration(
-              hintText: 'Search by name, phone...',
+              hintText: 'Search by name, phone, branch...',
               hintStyle: GoogleFonts.inter(color: AppColors.subtext),
               prefixIcon: const Icon(Icons.search, color: AppColors.subtext),
               filled: true,
@@ -587,20 +620,29 @@ class _RidersScreenState extends State<RidersScreen> {
             ),
           ),
         ),
-
-        // Stream Content
         Expanded(
-          child: StreamBuilder<List<Map<String, dynamic>>>(
-            stream: _streamRiders(),
+          child: FutureBuilder<List<Map<String, dynamic>>>(
+            future: _fetchRidersWithStores(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) return const Center(child: CircularProgressIndicator(color: AppColors.primary));
-              if (snapshot.hasError) return Center(child: Text('Database Error', style: const TextStyle(color: AppColors.error)));
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text('Database Error: ${snapshot.error}', style: const TextStyle(color: AppColors.error)));
+              }
 
-              final allRiders = snapshot.data ?? [];
+              final rawRiders = snapshot.data ?? [];
+
+              final allRiders = widget.isSuperAdmin
+                  ? rawRiders
+                  : rawRiders.where((r) => r['store_id']?.toString() == _resolvedStoreId).toList();
+
+              // --- UPDATED: Include store/branch name in search query filtering ---
               final riders = allRiders.where((r) {
                 final name = (r['full_name'] ?? '').toString().toLowerCase();
                 final phone = (r['phone'] ?? '').toString().toLowerCase();
-                return name.contains(_searchQuery) || phone.contains(_searchQuery);
+                final storeName = (r['stores']?['name'] ?? '').toString().toLowerCase();
+                return name.contains(_searchQuery) || phone.contains(_searchQuery) || storeName.contains(_searchQuery);
               }).toList();
 
               final int total = allRiders.length;
@@ -686,6 +728,9 @@ class _RidersScreenState extends State<RidersScreen> {
     final isActive = rider['is_active'] == true;
     final double cashInHand = (rider['cash_in_hand'] as num?)?.toDouble() ?? 0.0;
 
+    // --- UPDATED: Extract store/branch name from the joined relation ---
+    final storeName = rider['stores']?['name'] ?? 'Unassigned Branch';
+
     return Container(
       decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 8, offset: const Offset(0, 4))]),
       child: Column(
@@ -709,7 +754,8 @@ class _RidersScreenState extends State<RidersScreen> {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      Text(phone, style: GoogleFonts.inter(fontSize: 13, color: AppColors.subtext)),
+                      // --- UPDATED: Display branch name right below phone/name ---
+                      Text('$phone • $storeName', style: GoogleFonts.inter(fontSize: 12, color: AppColors.subtext, fontWeight: FontWeight.w500)),
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8, runSpacing: 4,

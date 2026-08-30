@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/theme/app_colors.dart';
 
-// We will build these 5 screens next!
 import 'dashboard_screen.dart';
 import 'order_screen.dart';
 import 'report_screen.dart';
@@ -22,40 +21,42 @@ class HomeLayout extends StatefulWidget {
 class _HomeLayoutState extends State<HomeLayout> {
   int _currentIndex = 0;
   String _appBarTitle = 'Dashboard';
-  String _userRole = 'Manager'; // Default to Manager for safety
-
-  final List<Widget> _pages = [
-    const DashboardScreen(),
-    const OrderScreen(),
-    const ReportScreen(),
-    const RidersScreen(),
-    const ProfileScreen(),
-  ];
+  String _userRole = 'Manager';
+  String? _managerStoreId;
+  bool _isLoadingRole = true;
 
   @override
   void initState() {
     super.initState();
-    _loadUserRole();
+    _loadUserRoleAndStore();
   }
 
-  Future<void> _loadUserRole() async {
+  Future<void> _loadUserRoleAndStore() async {
     final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      if (mounted) setState(() => _isLoadingRole = false);
+      return;
+    }
 
     try {
       final response = await Supabase.instance.client
           .from('team_members')
-          .select('role')
+          .select('role, store_id')
           .eq('email', user.email!)
           .maybeSingle();
 
       if (response != null && mounted) {
         setState(() {
           _userRole = response['role'] ?? 'Manager';
+          _managerStoreId = response['store_id'];
+          _isLoadingRole = false;
         });
+      } else {
+        if (mounted) setState(() => _isLoadingRole = false);
       }
     } catch (e) {
-      debugPrint('Error loading user role: $e');
+      debugPrint('Error loading user role and store: $e');
+      if (mounted) setState(() => _isLoadingRole = false);
     }
   }
 
@@ -64,7 +65,7 @@ class _HomeLayoutState extends State<HomeLayout> {
       _currentIndex = index;
       _appBarTitle = title;
     });
-    Navigator.pop(context); // Close the drawer after tapping
+    Navigator.pop(context);
   }
 
   Future<void> _logout() async {
@@ -125,10 +126,26 @@ class _HomeLayoutState extends State<HomeLayout> {
 
   @override
   Widget build(BuildContext context) {
-    final userEmail = Supabase.instance.client.auth.currentUser?.email ?? 'Unknown User';
+    if (_isLoadingRole) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: const Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
+      );
+    }
 
-    // Determine the display name based on the fetched role
-    final displayName = _userRole == 'Super Admin' ? 'EzeeWash Admin' : 'EzeeWash Manager';
+    final bool isSuperAdmin = _userRole == 'Super Admin';
+    final userEmail = Supabase.instance.client.auth.currentUser?.email ?? 'Unknown User';
+    final displayName = isSuperAdmin ? 'EzeeWash Admin' : 'EzeeWash Manager';
+
+    final List<Widget> pages = [
+      const DashboardScreen(),
+      const OrderScreen(),
+      const ReportScreen(),
+      RidersScreen(isSuperAdmin: isSuperAdmin, managerStoreId: _managerStoreId),
+      const ProfileScreen(),
+    ];
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -188,7 +205,6 @@ class _HomeLayoutState extends State<HomeLayout> {
 
             const Spacer(),
 
-            // Custom Rounded Sign Out Button
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
               child: SizedBox(
@@ -226,7 +242,7 @@ class _HomeLayoutState extends State<HomeLayout> {
       ),
       body: IndexedStack(
         index: _currentIndex,
-        children: _pages,
+        children: pages,
       ),
     );
   }

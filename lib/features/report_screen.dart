@@ -28,6 +28,11 @@ class _ReportScreenState extends State<ReportScreen> {
   bool _loading = true;
   String? _error;
 
+  // Admin Context Variables
+  String _adminRole = 'Manager';
+  String? _adminStoreId;
+  String _adminStoreName = 'Loading...';
+
   List<Map<String, dynamic>> _rawOrders = [];
   List<Map<String, dynamic>> _rawReviews = [];
   List<Map<String, dynamic>> _filteredByService = [];
@@ -52,15 +57,54 @@ class _ReportScreenState extends State<ReportScreen> {
   @override
   void initState() {
     super.initState();
+    _loadAdminDetails(); // Load role and store first
+  }
+
+  Future<void> _loadAdminDetails() async {
+    setState(() => _loading = true);
+
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      _loadReports();
+      return;
+    }
+
+    try {
+      final response = await Supabase.instance.client
+          .from('team_members')
+          .select('role, store_id, stores(name)')
+          .eq('email', user.email!)
+          .maybeSingle();
+
+      if (response != null && mounted) {
+        setState(() {
+          _adminRole = response['role'] ?? 'Manager';
+          _adminStoreId = response['store_id'];
+          _adminStoreName = response['stores']?['name'] ?? 'My Store';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading admin details: $e');
+    }
+
+    // Now fetch the reports with the correct role context applied
     _loadReports();
   }
 
   Future<void> _loadReports() async {
-    setState(() => _loading = true);
     try {
-      final orders = await Supabase.instance.client
+      // 1. Build the query
+      var ordersQuery = Supabase.instance.client
           .from(AppConstants.ordersTable)
-          .select('status, total_price, created_at, service_id, services(title)');
+          .select('status, total_price, created_at, service_id, stores(name), services(title)');
+
+      // 2. Apply Security Filter for Managers
+      if (_adminRole == 'Manager' && _adminStoreId != null) {
+        ordersQuery = ordersQuery.eq('store_id', _adminStoreId!);
+      }
+
+      // 3. Execute queries
+      final orders = await ordersQuery;
       _rawOrders = List<Map<String, dynamic>>.from(orders);
 
       final reviewsData = await Supabase.instance.client
@@ -99,7 +143,10 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   void _calculateFilteredData() {
-    if (_rawOrders.isEmpty) return;
+    if (_rawOrders.isEmpty) {
+      setState(() => _filteredByService = []);
+      return;
+    }
 
     final selectedMonthOrders = _rawOrders.where((o) {
       if (o['created_at'] == null) return false;
@@ -215,6 +262,8 @@ class _ReportScreenState extends State<ReportScreen> {
       }).toList();
 
       final pdf = pw.Document();
+      final reportContextString = _adminRole == 'Super Admin' ? 'ALL STORES' : _adminStoreName.toUpperCase();
+
       pdf.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.a4,
@@ -232,7 +281,7 @@ class _ReportScreenState extends State<ReportScreen> {
                       children: [
                         pw.Text('EzeeWash Analytics', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#0F172A'))),
                         pw.SizedBox(height: 4),
-                        pw.Text('MONTHLY PERFORMANCE REPORT', style: pw.TextStyle(fontSize: 9, color: PdfColor.fromHex('#64748B'), letterSpacing: 1.1)),
+                        pw.Text('MONTHLY PERFORMANCE REPORT - $reportContextString', style: pw.TextStyle(fontSize: 9, color: PdfColor.fromHex('#64748B'), letterSpacing: 1.1)),
                       ],
                     ),
                     pw.Text('${_monthName(_selectedMonth)} $_selectedYear', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#3B82F6'))),
@@ -385,20 +434,40 @@ class _ReportScreenState extends State<ReportScreen> {
 
     return Column(
       children: [
-        // Header
+        // Header with Branch Info dynamically injected
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Reports', style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.text)),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
-                onPressed: _rawOrders.isEmpty ? null : _exportMonthlyPDF,
+              Row(
+                children: [
+                  Text('Reports', style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.text)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
+                    onPressed: _rawOrders.isEmpty ? null : _exportMonthlyPDF,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh_rounded, color: AppColors.text),
+                    onPressed: _loadAdminDetails, // Refreshes role config as well as data
+                  ),
+                ],
               ),
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded, color: AppColors.text),
-                onPressed: _loadReports,
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.storefront_rounded, size: 16, color: Colors.green),
+                  const SizedBox(width: 6),
+                  Text(
+                    _adminRole == 'Super Admin' ? 'All Stores Overview' : _adminStoreName,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.green, // Highlighted in green as requested
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -409,7 +478,7 @@ class _ReportScreenState extends State<ReportScreen> {
           child: _loading
               ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
               : RefreshIndicator(
-            onRefresh: _loadReports,
+            onRefresh: _loadAdminDetails,
             color: AppColors.primary,
             child: ListView(
               padding: const EdgeInsets.all(16),

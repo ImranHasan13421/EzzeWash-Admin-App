@@ -16,22 +16,65 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _loading = true;
   Map<String, dynamic> _stats = {};
 
+  // Admin Context Variables
+  String _adminRole = 'Manager';
+  String? _adminStoreId;
+  String _adminStoreName = 'Loading...';
+
   @override
   void initState() {
     super.initState();
+    _loadAdminDetails(); // Fetch role and store first
+  }
+
+  Future<void> _loadAdminDetails() async {
+    setState(() => _loading = true);
+
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      _loadStats();
+      return;
+    }
+
+    try {
+      // Fetch admin role and assigned store name from the team_members table
+      final response = await Supabase.instance.client
+          .from('team_members')
+          .select('role, store_id, stores(name)')
+          .eq('email', user.email!)
+          .maybeSingle();
+
+      if (response != null && mounted) {
+        setState(() {
+          _adminRole = response['role'] ?? 'Manager';
+          _adminStoreId = response['store_id'];
+          _adminStoreName = response['stores']?['name'] ?? 'My Store';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading admin details: $e');
+    }
+
+    // Now fetch the stats with the correct role context applied
     _loadStats();
   }
 
   Future<void> _loadStats() async {
-    setState(() => _loading = true);
     try {
       final now = DateTime.now();
 
-      // Fetch core order data from Supabase
-      final response = await Supabase.instance.client
+      // 1. Start building the query
+      var query = Supabase.instance.client
           .from(AppConstants.ordersTable)
           .select('status, total_price, created_at');
 
+      // 2. Apply Security Filter for Managers (Only fetch THEIR branch details)
+      if (_adminRole == 'Manager' && _adminStoreId != null) {
+        query = query.eq('store_id', _adminStoreId!);
+      }
+
+      // 3. Execute query
+      final response = await query;
       final orders = List<Map<String, dynamic>>.from(response);
 
       int total = orders.length;
@@ -91,7 +134,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final int delivered = _stats['delivered'] ?? 0;
 
     return RefreshIndicator(
-      onRefresh: _loadStats,
+      onRefresh: _loadAdminDetails, // Refresh everything including role
       color: AppColors.primary,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -102,6 +145,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Text(
               'Today\'s Overview',
               style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.text),
+            ),
+            const SizedBox(height: 4),
+            // Dynamically show the assigned branch name in Green
+            Text(
+              _adminRole == 'Super Admin' ? 'All Stores Overview' : _adminStoreName,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.green, // Highlighted in green as requested
+              ),
             ),
             const SizedBox(height: 16),
 

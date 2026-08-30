@@ -85,10 +85,10 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(
-                  Icons.local_laundry_service_rounded,
-                  size: 80,
-                  color: AppColors.primary,
+                // App Logo Image replacing the Icon
+                Image.asset(
+                  'assets/icon/logo.png',
+                  height: 80,
                 ),
                 const SizedBox(height: 24),
                 Text(

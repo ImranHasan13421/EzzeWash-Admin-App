@@ -2,11 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:image_picker/image_picker.dart';
-import 'dart:typed_data';
-import 'dart:ui';
 import '../core/theme/app_colors.dart';
-import 'admin_login_screen.dart';
 
 // --- DYNAMIC THEME HELPERS ---
 bool _isDark(BuildContext context) => Theme.of(context).brightness == Brightness.dark;
@@ -31,7 +27,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _loading = false;
   bool _isSaving = false;
   bool _isInviting = false;
-  bool _isSuperAdmin = true; // Assuming true for admin app context
+
+  // Role Authentication variables
+  bool _isSuperAdmin = false;
+  String _adminRole = 'Manager';
 
   // Controllers
   final _nameCtrl = TextEditingController();
@@ -55,10 +54,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<Map<String, dynamic>> _promosList = [];
 
   String _customerSearchQuery = '';
-  String _promoSearchQuery = '';
-  bool _showingPromoHistory = false;
-  String _promoHistorySort = 'Newest';
-
   User? currentUser;
   String _joinedDate = 'Unknown';
 
@@ -81,15 +76,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         _joinedDate = '${months[createdAt.month - 1]} ${createdAt.day}, ${createdAt.year}';
       }
+
+      // 1. Fetch user role from database
+      try {
+        final response = await Supabase.instance.client
+            .from('team_members')
+            .select('role')
+            .eq('email', currentUser!.email!)
+            .maybeSingle();
+
+        if (response != null) {
+          _adminRole = response['role'] ?? 'Manager';
+        }
+      } catch (e) {
+        debugPrint('Error loading admin details: $e');
+      }
     }
 
+    _isSuperAdmin = _adminRole == 'Super Admin';
+
+    // 2. Conditionally load data based on privileges
     await Future.wait([
-      _loadBusinessSettings(),
-      _loadStores(),
-      _loadTeamMembers(),
-      _loadServices(),
-      _loadCustomers(),
-      _loadPromos(),
+      if (_isSuperAdmin) _loadBusinessSettings(),
+      if (_isSuperAdmin) _loadStores(),
+      if (_isSuperAdmin) _loadTeamMembers(),
+      if (_isSuperAdmin) _loadCustomers(),
+      _loadServices(), // Managers still need access to catalog
+      _loadPromos(),   // Managers still need access to active promos
     ]);
 
     if (mounted) setState(() => _loading = false);
@@ -221,15 +234,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 3. Dynamically build available tabs based on role
     final List<Map<String, dynamic>> tabs = [
       {'id': 'profile', 'name': 'Profile', 'icon': Icons.person_outline},
       {'id': 'security', 'name': 'Security', 'icon': Icons.shield_outlined},
       if (_isSuperAdmin) {'id': 'team', 'name': 'Team', 'icon': Icons.people_outline},
-      if (_isSuperAdmin) {'id': 'business', 'name': 'Business', 'icon': Icons.business_center_outlined},
+      if (_isSuperAdmin) {'id': 'business', 'name': 'Business Info', 'icon': Icons.business_center_outlined},
+
       if (_isSuperAdmin) {'id': 'customers', 'name': 'Customers', 'icon': Icons.manage_accounts_outlined},
-      if (_isSuperAdmin) {'id': 'promos', 'name': 'Promos', 'icon': Icons.campaign_outlined},
+      {'id': 'promos', 'name': 'Promos', 'icon': Icons.campaign_outlined},
       if (_isSuperAdmin) {'id': 'stores', 'name': 'Stores', 'icon': Icons.store_mall_directory_outlined},
-      if (_isSuperAdmin) {'id': 'services', 'name': 'Services', 'icon': Icons.dry_cleaning_outlined},
+      {'id': 'services', 'name': 'Services', 'icon': Icons.dry_cleaning_outlined},
     ];
 
     if (_tab != null && _tab! >= tabs.length) _tab = null;
@@ -278,20 +293,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return Column(
       children: [
-        // Header
+        // Header (Sign out removed)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Settings', style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: _textColor(context))),
-              IconButton(
-                icon: const Icon(Icons.logout, color: AppColors.error),
-                onPressed: () async {
-                  await Supabase.instance.client.auth.signOut();
-                  if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AdminLoginScreen()));
-                },
-              )
             ],
           ),
         ),
@@ -304,12 +311,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             padding: const EdgeInsets.all(16),
             physics: const BouncingScrollPhysics(),
             children: [
-              _buildCategoryCard('Administration', Icons.admin_panel_settings_outlined, 'admin', 'Profile, security & team'),
+              _buildCategoryCard('Administration', Icons.admin_panel_settings_outlined, 'admin', 'Profile, security${_isSuperAdmin ? ' & team' : ''}'),
               if (_expandedGroup == 'admin') buildTabRow(adminTabs),
 
               const SizedBox(height: 16),
 
-              if (_isSuperAdmin) _buildCategoryCard('Business', Icons.storefront_outlined, 'business', 'Customers, promos & services'),
+              _buildCategoryCard('Business', Icons.storefront_outlined, 'business', '${_isSuperAdmin ? 'Customers, promos & services' : 'Promos & services'}'),
               if (_expandedGroup == 'business') buildTabRow(bizTabs),
 
               if (_tab != null)
@@ -322,11 +329,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       final id = tabs[_tab!]['id'];
                       if (id == 'profile') return _profileTab();
                       if (id == 'security') return _securityTab();
-                      if (id == 'team') return _teamTab();
-                      if (id == 'business') return _businessTab();
-                      if (id == 'customers') return _customersTab();
+                      if (id == 'team' && _isSuperAdmin) return _teamTab();
+                      if (id == 'business' && _isSuperAdmin) return _businessTab();
+                      if (id == 'customers' && _isSuperAdmin) return _customersTab();
                       if (id == 'promos') return _promosTab();
-                      if (id == 'stores') return _storesTab();
+                      if (id == 'stores' && _isSuperAdmin) return _storesTab();
                       if (id == 'services') return _servicesTab();
                       return const SizedBox.shrink();
                     }),
@@ -360,7 +367,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Text(_nameCtrl.text, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: _textColor(context))),
               Text(_emailCtrl.text, style: GoogleFonts.inter(fontSize: 13, color: _subtextColor(context))),
               const SizedBox(height: 4),
-              _roleBadge(_isSuperAdmin ? 'Super Admin' : 'Manager'),
+              _roleBadge(_adminRole), // Uses the actual database role
             ]),
           )
         ]),
@@ -412,7 +419,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _teamTab() {
     return _sectionCard(
         title: 'Team Members',
-        icon: Icons.people_outline, // <-- Added this missing icon!
+        icon: Icons.people_outline,
         subtitle: '${_teamMembers.length + 1} members',
         actionWidget: IconButton(
           onPressed: () => setState(() => _isInviting = !_isInviting),
@@ -545,24 +552,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-
-                    // FIX: Wrapped title in Expanded to prevent RenderFlex overflow
                     Expanded(
                       child: Text(
                         p['title'] ?? 'Promo',
                         style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16),
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis, // Adds '...' if too long
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-
                     Switch(value: p['is_active'] ?? false, activeColor: AppColors.success, onChanged: (_) => _togglePromoStatus(p)),
                   ]),
                   Text(p['code'].toString().toUpperCase(), style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-
-                    // FIX: Wrapped usage text in Expanded as well to be safe
                     Expanded(
                       child: Text(
                         'Used: ${p['times_used'] ?? 0}/${p['usage_limit'] ?? '∞'}',
@@ -571,7 +573,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-
                     Row(children: [
                       IconButton(icon: const Icon(Icons.edit, size: 18, color: Colors.blue), onPressed: () => _showAddPromoDialog(p)),
                       IconButton(icon: const Icon(Icons.delete, size: 18, color: AppColors.error), onPressed: () async { await Supabase.instance.client.from('promos').delete().eq('id', p['id']); _loadPromos(); }),
@@ -585,8 +586,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showAddPromoDialog(Map<String, dynamic>? promo) {
-    // Due to mobile constraints, a simplified dialog or push navigation is recommended here.
-    // For this example, notifying the admin that advanced creation is best done on desktop.
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Promo management is optimized for the desktop portal.')));
   }
 

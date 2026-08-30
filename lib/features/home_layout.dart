@@ -22,6 +22,7 @@ class HomeLayout extends StatefulWidget {
 class _HomeLayoutState extends State<HomeLayout> {
   int _currentIndex = 0;
   String _appBarTitle = 'Dashboard';
+  String _userRole = 'Manager'; // Default to Manager for safety
 
   final List<Widget> _pages = [
     const DashboardScreen(),
@@ -30,6 +31,33 @@ class _HomeLayoutState extends State<HomeLayout> {
     const RidersScreen(),
     const ProfileScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserRole();
+  }
+
+  Future<void> _loadUserRole() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final response = await Supabase.instance.client
+          .from('team_members')
+          .select('role')
+          .eq('email', user.email!)
+          .maybeSingle();
+
+      if (response != null && mounted) {
+        setState(() {
+          _userRole = response['role'] ?? 'Manager';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading user role: $e');
+    }
+  }
 
   void _onMenuTap(int index, String title) {
     setState(() {
@@ -50,9 +78,57 @@ class _HomeLayoutState extends State<HomeLayout> {
     }
   }
 
+  Future<void> _confirmLogout() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            'Sign Out',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: AppColors.text),
+          ),
+          content: Text(
+            'Are you sure want to sign out?',
+            style: GoogleFonts.inter(color: AppColors.text, fontSize: 15),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(
+                  'Cancel',
+                  style: GoogleFonts.inter(color: AppColors.subtext, fontWeight: FontWeight.bold)
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(
+                  'Sign Out',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.bold)
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      _logout();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final userEmail = Supabase.instance.client.auth.currentUser?.email ?? 'Manager';
+    final userEmail = Supabase.instance.client.auth.currentUser?.email ?? 'Unknown User';
+
+    // Determine the display name based on the fetched role
+    final displayName = _userRole == 'Super Admin' ? 'EzeeWash Admin' : 'EzeeWash Manager';
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -72,11 +148,10 @@ class _HomeLayoutState extends State<HomeLayout> {
           children: [
             UserAccountsDrawerHeader(
               decoration: const BoxDecoration(color: AppColors.primary),
-              accountName: Text('EzeeWash Admin', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+              accountName: Text(displayName, style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
               accountEmail: Text(userEmail, style: GoogleFonts.inter()),
-              currentAccountPicture: const CircleAvatar(
-                backgroundColor: Colors.white,
-                child: Icon(Icons.local_laundry_service, color: AppColors.primary),
+              currentAccountPicture: Image.asset(
+                'assets/icon/logo.png',
               ),
             ),
             ListTile(
@@ -106,17 +181,46 @@ class _HomeLayoutState extends State<HomeLayout> {
             const Divider(),
             ListTile(
               leading: const Icon(Icons.person_outline),
-              title: Text('Profile', style: GoogleFonts.inter()),
+              title: Text('Settings', style: GoogleFonts.inter()),
               selected: _currentIndex == 4,
-              onTap: () => _onMenuTap(4, 'Profile'),
+              onTap: () => _onMenuTap(4, 'Settings'),
             ),
+
             const Spacer(),
-            ListTile(
-              leading: const Icon(Icons.logout, color: AppColors.error),
-              title: Text('Log Out', style: GoogleFonts.inter(color: AppColors.error, fontWeight: FontWeight.bold)),
-              onTap: _logout,
+
+            // Custom Rounded Sign Out Button
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: _confirmLogout,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.logout, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Sign Out',
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
-            const SizedBox(height: 24),
           ],
         ),
       ),

@@ -13,8 +13,59 @@ class OrderScreen extends StatefulWidget {
 }
 
 class _OrderScreenState extends State<OrderScreen> {
-  // Stream for real-time updates directly from Supabase
+  bool _loadingAdmin = true;
+  String _adminRole = 'Manager';
+  String? _adminStoreId;
+  String _adminStoreName = 'Loading branch...';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAdminDetails();
+  }
+
+  Future<void> _loadAdminDetails() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      if (mounted) setState(() => _loadingAdmin = false);
+      return;
+    }
+
+    try {
+      final response = await Supabase.instance.client
+          .from('team_members')
+          .select('role, store_id, stores(name)')
+          .eq('email', user.email!)
+          .maybeSingle();
+
+      if (response != null && mounted) {
+        setState(() {
+          _adminRole = response['role'] ?? 'Manager';
+          _adminStoreId = response['store_id'];
+          _adminStoreName = response['stores']?['name'] ?? 'My Store';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading admin details: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _loadingAdmin = false);
+      }
+    }
+  }
+
+  // Stream for real-time updates directly from Supabase with role filter
   Stream<List<Map<String, dynamic>>> _streamOrders() {
+    // If Manager and store ID is known, filter the stream by store_id
+    if (_adminRole == 'Manager' && _adminStoreId != null) {
+      return Supabase.instance.client
+          .from(AppConstants.ordersTable)
+          .stream(primaryKey: ['id'])
+          .eq('store_id', _adminStoreId!)
+          .order('created_at', ascending: false);
+    }
+
+    // Super Admin receives all stores
     return Supabase.instance.client
         .from(AppConstants.ordersTable)
         .stream(primaryKey: ['id'])
@@ -126,10 +177,38 @@ class _OrderScreenState extends State<OrderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingAdmin) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    }
+
     return DefaultTabController(
       length: 4,
       child: Column(
         children: [
+          // Branch Information Bar
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: AppColors.surface,
+            child: Row(
+              children: [
+                const Icon(Icons.storefront_rounded, size: 18, color: Colors.green),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _adminRole == 'Super Admin' ? 'All Stores Overview' : _adminStoreName,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.green,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           // The Swipeable Tab Bar
           Container(
             color: AppColors.surface,
@@ -169,7 +248,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 return TabBarView(
                   physics: const BouncingScrollPhysics(),
                   children: [
-                    // Tab 1: Pending & Due (Includes pickup assignments)
+                    // Tab 1: Pending & Due
                     _buildOrderList(orders, [
                       AppConstants.statusPending,
                       AppConstants.statusConfirmed,
